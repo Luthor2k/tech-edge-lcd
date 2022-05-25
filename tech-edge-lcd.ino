@@ -25,7 +25,7 @@ byte sequence_counter;
 byte tick_high;
 byte tick_low;
 
-int lambda16;
+unsigned int lambda16;
 
 int user1;
 int user2;
@@ -129,6 +129,7 @@ float boost_pressure;
 float oil_pressure;
 float intake_temperature;
 //float coolant_temperature;
+//float throttle_position; //more important for tuning than oil, if recorded
 
 int exhuast_temperature;
 int oil_temperature;
@@ -153,8 +154,9 @@ void setup() {
   lcd.clear();
 
   //some test data:
-  lambda16 = 10000;
-  AFR = (( lambda16 / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
+  lambda16 = 10000;  //should be diesel stoic
+  //float lambdaF = float(lambda16);
+  //AFR = (( lambdaF / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
 
 }
 
@@ -180,7 +182,7 @@ void check_serial()
 
     serialStreamCount = Serial.readBytesUntil(0x5A, incomingSerial, 30);
 
-    if (incomingSerial[0] == byte(0xA5))
+    if (incomingSerial[0] == byte(0xA5))    //should be the second of the 0x5A 0xA5 frame header
     {
       //while(Serial.available() > 0){int garbage = Serial.read();}   //flush input buffer
       /*
@@ -219,7 +221,14 @@ void check_serial()
            lambda = 5.0 + ((lambda16 - 36864 ) / 128);
         }
     ` */
-      AFR = (( lambda16 / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
+      float lambdaF = float(lambda16);
+
+      // tHIS MAGE NUMBER CAME FROM xxxxx
+      const float EIGHT_KB = 1024 * 8 ;
+
+      
+      //((float) lamda16 / EIGHT_KB ) //steven
+      AFR = (( lambdaF / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
   
       //boost_pressure = user1 * 0.0024438; //0-30psi sensor
       boost_pressure = map(user1, 0, 8184, 0, 3000);  // 0 - 5 volts maps shows inthe dac as 0 - 8184, maps to 0 - "30" psi
@@ -269,74 +278,91 @@ void update_display() //called once per ~100ms to refresh the display
 
   ///FIRST LINE///
   lcd.setCursor(0, 0);
+  
   lcd.write("AFR:");
-  if (AFR < 70)
+  if (AFR < 50)
   {
     dtostrf(AFR, 3, 1, printable_data);
   }
   else
   {
-    status_lean.toCharArray(printable_data, 5);
+    status_lean.toCharArray(printable_data, 5); //if running in a lean condition, paste lean test into lcd buffer
   }
   lcd.print(printable_data);  
-  lcd.setCursor(10, 0);
-  lcd.write("RAW:");
+  //lcd.setCursor(10, 0);
+  //lcd.write("RAW:");
+  //lcd.setCursor(14, 0);
   //dtostrf(RPM_count, 4, 0, printable_data);
-  dtostrf(lambda16, 4, 0, printable_data);
+  //dtostrf(lambda16, 5, 0, printable_data);
+  //lcd.print(printable_data);
+  //sprintf(printable_data, "RAW: %d", lambda16);
+  //lcd.print(printable_data);
+  //lcd.print(String(lambda16));
+  /*
+  char str_temp[6];
+  // 4 is mininum width, 2 is precision; float value is copied onto str_temp
+  AFR = 14.9;
+  dtostrf(AFR, 4, 1, str_temp);   //arduino doesnt do floats
+  sprintf (printable_data, "AFR: %s RAW: %d", str_temp, lambda16);
   lcd.print(printable_data);
+  */
+
+  lcd.setCursor(10, 0);
+  lcd.write("EGT:");
+  //exhuast_temperature = 999;
+  dtostrf(exhuast_temperature, 3, 0, printable_data);
+  lcd.print(printable_data);
+  lcd.write(0xDF);
+  lcd.write("C ");  
   
   ///SECOND LINE///
   lcd.setCursor(0, 1);
-  lcd.write("INT:");
+  lcd.write("Coolant:");
   //boost_pressure = 12.1;
-  dtostrf(boost_pressure, 3, 0, printable_data);
-  lcd.print(printable_data);
-  lcd.write(" PSI");
-  lcd.setCursor(12, 1);
+  //dtostrf(boost_pressure, 3, 0, printable_data);
+  //lcd.print(printable_data);
+  //lcd.write(" PSI");
+  //lcd.setCursor(12, 1);
   //intake_temperature = 55;
   dtostrf(intake_temperature, 3, 0, printable_data);
   lcd.print(printable_data);
-  lcd.write(0xDF); //oxDF is the degree sign
-  lcd.write("C");
+  lcd.write(0xDF); //0xDF is the degree sign
+  lcd.write("C  ");
 
-  lcd.setCursor(18, 1);
-  //dtostrf(sensor_state, 2, 0, printable_data); //print pump cell pid state
-  //lcd.print(printable_data);
-  lcd.print(String(sensor_state));
 
-  lcd.setCursor(19, 1);
-  //dtostrf(heater_state, 2, 0, printable_data); //print heater pid state
-  //lcd.print(printable_data);
-  lcd.print(String(heater_state));
 
   ///THIRD LINE///
   lcd.setCursor(0, 2);
   lcd.write("OIL:");
   //oil_pressure = 34.8;
-  dtostrf(oil_pressure, 3, 0, printable_data);    //OIL PSI
-  lcd.print(printable_data);
-  lcd.write(" PSI");
-  lcd.setCursor(12, 2);
+  //dtostrf(oil_pressure, 3, 0, printable_data);    //OIL PSI
+  //lcd.print(printable_data);
+  //lcd.write(" PSI");
+  //lcd.setCursor(12, 2);
   //oil_temperature = 0;
   dtostrf(oil_temperature, 3, 0, printable_data); //oil temperature
   lcd.print(printable_data);
-  lcd.write(0xDF); //oxDF is the degree sign
-  lcd.write("C");
+  lcd.write(0xDF); //0xDF is the degree sign
+  lcd.write("C  ");
 
   ///FOURTH LINE///
   //turbo_temperature = 999;
   lcd.setCursor(0, 3);
-  lcd.write("TOOT:");
+  lcd.write("METER:");
   dtostrf(turbo_temperature, 3, 0, printable_data);
   lcd.print(printable_data);
+  lcd.write(0xDF); //0xDF is the degree sign
+  lcd.write("C  ");
 
-  lcd.write(0xDF);
-  lcd.write("C EGT:");
-  //exhuast_temperature = 999;
-  dtostrf(exhuast_temperature, 3, 0, printable_data);
-  lcd.print(printable_data);
-  lcd.write(0xDF);
-  lcd.write("C");
+  lcd.setCursor(17, 3);
+  //dtostrf(sensor_state, 2, 0, printable_data); //print pump cell pid state
+  //lcd.print(printable_data);
+  lcd.print(String(sensor_state));
+
+  lcd.setCursor(19, 3);
+  //dtostrf(heater_state, 2, 0, printable_data); //print heater pid state
+  //lcd.print(printable_data);
+  lcd.print(String(heater_state));  
 }
 
 void update_brightness()
