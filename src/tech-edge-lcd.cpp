@@ -155,6 +155,7 @@ bool check_serial();
 void update_averages();
 void update_display();
 void update_brightness();
+void remap_raw_values();
 
 void setup() {
   Serial.begin(19200);
@@ -177,6 +178,7 @@ void loop() {
 
   if (check_serial() == true){
     update_averages();
+    remap_raw_values();
   }
 
   if (currentMillis - prevDisplayUpdateTime >= DisplayUpdateInterval) {
@@ -230,55 +232,6 @@ bool check_serial()
     
         sensor_state = byte(incomingSerial[24]) & byte(0x07);  //wideband pump cell pid state bits
         heater_state = byte(incomingSerial[25]) & byte(0x07);  //wideband heater pid state bits
-    
-        /// remap all raw values to their real-world values: ///
-        /*
-        if (lambda16 < 36864) //check if condition is in regular tuning range or if its super lean
-          {
-            lambda = ( lambda16 / 8192 ) + 0.5;
-          }
-        else
-          {
-             lambda = 5.0 + ((lambda16 - 36864 ) / 128);
-          }
-      ` */
-        float lambdaF = float(lambda16);
-  
-        AFR = (( lambdaF / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
-    
-        //boost_pressure = user1 * 0.0024438; //0-30psi sensor
-        boost_pressure = map(user1, 818, 7366, 0, 3000);  // 0 - 5 volts maps shows inthe dac as 0 - 8184, maps to 0 - "30" psi
-        boost_pressure = boost_pressure / 100;  //get a float
-  
-        oil_pressure = map(user2, 8184, 6465, 0, 110);  //oil pressure sensor
-  
-        /*
-        int i = 1;  //VW coolant temp sensor, not linear so lookup table needed
-        for (i = 1; user2 > coolantSenseTable[i]; i = i + 2) { }
-        coolant_temperature = map(user2, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
-        */
-        int i = 1;  //VW intake temp sensor, not linear so lookup table needed
-        for (i = 1; user3 > coolantSenseTable[i]; i = i + 2) { }
-        intake_temperature = map(user3, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
-    
-        //before dealing with the thermocouples, we must first calc the CJC temperature
-        i = 1;  //DAQ RTD temperature sensor, not linear so lookup table needed
-        for (i = 1; thermistor < DAQ_Temp_Table[i]; i = i + 2) { }
-        DAQ_temperature = map(thermistor, DAQ_Temp_Table[i - 2], DAQ_Temp_Table[i], DAQ_Temp_Table[i - 3], DAQ_Temp_Table[i - 1]);
-      
-        i = 1;
-        for (i = 1; thermocouple1 > thermocouple_Table[i]; i = i + 2) { }
-        exhuast_temperature = map(thermocouple1, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
-    
-        i = 1;
-        for (i = 1; thermocouple2 > thermocouple_Table[i]; i = i + 2) { }
-        oil_temperature = map(thermocouple2, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
-        
-        i = 1;
-        for (i = 1; thermocouple3 > thermocouple_Table[i]; i = i + 2) { }
-        turbo_temperature = map(thermocouple3, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
-  
-        rpm_engine = 12000000 / RPM_count;  //1.2 million is appropriate for one pulse per crankshaft revolution
         return true;
       }
     }
@@ -289,6 +242,58 @@ bool check_serial()
 void update_averages()
 {
   delay(1);
+}
+
+void remap_raw_values()
+{
+  /// remap all raw values to their real-world values: ///
+  /*
+  if (lambda16 < 36864) //check if condition is in regular tuning range or if its super lean
+    {
+      lambda = ( lambda16 / 8192 ) + 0.5;
+    }
+  else
+    {
+        lambda = 5.0 + ((lambda16 - 36864 ) / 128);
+    }
+` */
+  float lambdaF = float(lambda16);
+
+  AFR = (( lambdaF / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
+
+  //boost_pressure = user1 * 0.0024438; //0-30psi sensor
+  boost_pressure = map(user1, 818, 7366, 0, 3000);  // 0 - 5 volts maps shows inthe dac as 0 - 8184, maps to 0 - "30" psi
+  boost_pressure = boost_pressure / 100;  //get a float
+
+  oil_pressure = map(user2, 8184, 6465, 0, 110);  //oil pressure sensor
+
+  /*
+  int i = 1;  //VW coolant temp sensor, not linear so lookup table needed
+  for (i = 1; user2 > coolantSenseTable[i]; i = i + 2) { }
+  coolant_temperature = map(user2, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
+  */
+  int i = 1;  //VW intake temp sensor, not linear so lookup table needed
+  for (i = 1; user3 > coolantSenseTable[i]; i = i + 2) { }
+  intake_temperature = map(user3, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
+
+  //before dealing with the thermocouples, we must first calc the CJC temperature
+  i = 1;  //DAQ RTD temperature sensor, not linear so lookup table needed
+  for (i = 1; thermistor < DAQ_Temp_Table[i]; i = i + 2) { }
+  DAQ_temperature = map(thermistor, DAQ_Temp_Table[i - 2], DAQ_Temp_Table[i], DAQ_Temp_Table[i - 3], DAQ_Temp_Table[i - 1]);
+
+  i = 1;
+  for (i = 1; thermocouple1 > thermocouple_Table[i]; i = i + 2) { }
+  exhuast_temperature = map(thermocouple1, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+
+  i = 1;
+  for (i = 1; thermocouple2 > thermocouple_Table[i]; i = i + 2) { }
+  oil_temperature = map(thermocouple2, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+  
+  i = 1;
+  for (i = 1; thermocouple3 > thermocouple_Table[i]; i = i + 2) { }
+  turbo_temperature = map(thermocouple3, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+
+  rpm_engine = 12000000 / RPM_count;  //1.2 million is appropriate for one pulse per crankshaft revolution
 }
 
 void update_display() //called once per ~100ms to refresh the display
