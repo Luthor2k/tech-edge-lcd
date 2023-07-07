@@ -10,7 +10,10 @@ int LDRState = 1;  // will be set to one of four brightness levels
 
 //program funtion timing
 unsigned long prevDisplayUpdateTime = 0;
-const long DisplayUpdateInterval = 100;
+const long DisplayUpdateInterval = 100; //ms
+
+unsigned long prevBrightnessUpdateTime = 0;
+const long BrightnessUpdateInterval = 5000; //ms
 
 //Serial stream from controller
 byte incomingSerial[56];
@@ -44,8 +47,6 @@ byte status_low;
 
 byte sensor_state;
 byte heater_state;
-
-byte CRC;
 
 //lookup look loop counter
 int i = 0;
@@ -137,10 +138,14 @@ int turbo_temperature;
 
 int DAQ_temperature;
 
-int RPM;
+int rpm_engine;
 
 int WB_STATUS;
 
+int crc_sum;
+byte crc_comp;
+
+bool crc_good;
 
 LiquidCrystal lcd(13, 11, 5, 4, 3, 2);
 
@@ -163,108 +168,124 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  check_serial();
+  if (check_serial() == true){
+    update_averages();
+  }
 
   if (currentMillis - prevDisplayUpdateTime >= DisplayUpdateInterval) {
     prevDisplayUpdateTime = currentMillis;
-
-    update_brightness();
     update_display();
+  }
+
+  if (currentMillis - prevBrightnessUpdateTime >= BrightnessUpdateInterval) {
+    prevBrightnessUpdateTime = currentMillis;
+    update_brightness();
   }
 
 }
 
-void check_serial()
+bool check_serial()
 {
   if (Serial.available() > 0) {
 
     delay(15);  //pause for the time of 1 frame to complete, 15ms?
 
-    serialStreamCount = Serial.readBytesUntil(0x5A, incomingSerial, 30);
+    Serial.readBytesUntil(0x5A, incomingSerial, 30);
 
     if (incomingSerial[0] == byte(0xA5))    //should be the second of the 0x5A 0xA5 frame header
     {
-      //while(Serial.available() > 0){int garbage = Serial.read();}   //flush input buffer
-      /*
-          for (int i = 0; i <= 27; i++) {
-            lcd.print(incomingSerial[i], HEX);
-          }
-      */
-  
-      /// Break apart the frame: ///
-      sequence_counter = incomingSerial[1];
-  
-      lambda16 = (int(incomingSerial[4]) * 256) + int(incomingSerial[5]);
-  
-      user1 = (int(incomingSerial[8]) * 256) + int(incomingSerial[9]);      //boost pressure
-      user2 = (int(incomingSerial[10]) * 256) + int(incomingSerial[11]);    //oil pressure
-      user3 = (int(incomingSerial[12]) * 256) + int(incomingSerial[13]);    //intake temperature
-  
-      thermocouple1 = (int(incomingSerial[14]) * 256) + int(incomingSerial[15]);  //egt, needs correcting curve to be applied
-      thermocouple2 = (int(incomingSerial[16]) * 256) + int(incomingSerial[17]);  //oil temp
-      thermocouple3 = (int(incomingSerial[18]) * 256) + int(incomingSerial[19]);  //turbo temp
-  
-      thermistor = (int(incomingSerial[20]) * 256) + int(incomingSerial[21]);
-      RPM_count = (int(incomingSerial[22]) * 256) + int(incomingSerial[23]);
-  
-      sensor_state = byte(incomingSerial[24]) & byte(0x07);  //wideband pump cell pid state bits
-      heater_state = byte(incomingSerial[25]) & byte(0x07);  //wideband heater pid state bits
-  
-      /// remap all raw values to their real-world values: ///
-      /*
-      if (lambda16 < 36864) //check if condition is in regular tuning range or if its super lean
-        {
-          lambda = ( lambda16 / 8192 ) + 0.5;
-        }
-      else
-        {
-           lambda = 5.0 + ((lambda16 - 36864 ) / 128);
-        }
-    ` */
-      float lambdaF = float(lambda16);
+      // CRC calculation
+      crc_sum = 0;
+      for (byte frame_byte_number = 0; frame_byte_number < 27; frame_byte_number++){
+        crc_sum += incomingSerial[frame_byte_number];
+        crc_comp = lowByte(crc_sum);  //should ALWAYS be 0xFF
+      }
 
-      // tHIS MAGE NUMBER CAME FROM xxxxx
-      const float EIGHT_KB = 1024 * 8 ;
-
-      
-      //((float) lamda16 / EIGHT_KB ) //steven
-      AFR = (( lambdaF / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
+      crc_good = false;
+      if (crc_comp == 0xA5){
+        crc_good = true;
   
-      //boost_pressure = user1 * 0.0024438; //0-30psi sensor
-      boost_pressure = map(user1, 0, 8184, 0, 3000);  // 0 - 5 volts maps shows inthe dac as 0 - 8184, maps to 0 - "30" psi
-      boost_pressure = boost_pressure / 100;  //get a float
-
-      oil_pressure = map(user2, 8184, 6465, 0, 110);  //oil pressure sensor
-
-      /*
-      int i = 1;  //VW coolant temp sensor, not linear so lookup table needed
-      for (i = 1; user2 > coolantSenseTable[i]; i = i + 2) { }
-      coolant_temperature = map(user2, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
-      */
-      int i = 1;  //VW intake temp sensor, not linear so lookup table needed
-      for (i = 1; user3 > coolantSenseTable[i]; i = i + 2) { }
-      intake_temperature = map(user3, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
-  
-      //before dealing with the thermocouples, we must first calc the CJC temperature
-      i = 1;  //DAQ RTD temperature sensor, not linear so lookup table needed
-      for (i = 1; thermistor < DAQ_Temp_Table[i]; i = i + 2) { }
-      DAQ_temperature = map(thermistor, DAQ_Temp_Table[i - 2], DAQ_Temp_Table[i], DAQ_Temp_Table[i - 3], DAQ_Temp_Table[i - 1]);
+        /// Break apart the frame: ///
+        sequence_counter = incomingSerial[1];
     
-      i = 1;
-      for (i = 1; thermocouple1 > thermocouple_Table[i]; i = i + 2) { }
-      exhuast_temperature = map(thermocouple1, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+        lambda16 = (int(incomingSerial[4]) * 256) + int(incomingSerial[5]);
+    
+        user1 = (int(incomingSerial[8]) * 256) + int(incomingSerial[9]);      //boost pressure
+        user2 = (int(incomingSerial[10]) * 256) + int(incomingSerial[11]);    //oil pressure
+        user3 = (int(incomingSerial[12]) * 256) + int(incomingSerial[13]);    //intake temperature
+    
+        thermocouple1 = (int(incomingSerial[14]) * 256) + int(incomingSerial[15]);  //egt, needs correcting curve to be applied
+        thermocouple2 = (int(incomingSerial[16]) * 256) + int(incomingSerial[17]);  //oil temp
+        thermocouple3 = (int(incomingSerial[18]) * 256) + int(incomingSerial[19]);  //turbo temp
+    
+        thermistor = (int(incomingSerial[20]) * 256) + int(incomingSerial[21]);
+        RPM_count = (int(incomingSerial[22]) * 256) + int(incomingSerial[23]);
+    
+        sensor_state = byte(incomingSerial[24]) & byte(0x07);  //wideband pump cell pid state bits
+        heater_state = byte(incomingSerial[25]) & byte(0x07);  //wideband heater pid state bits
+    
+        /// remap all raw values to their real-world values: ///
+        /*
+        if (lambda16 < 36864) //check if condition is in regular tuning range or if its super lean
+          {
+            lambda = ( lambda16 / 8192 ) + 0.5;
+          }
+        else
+          {
+             lambda = 5.0 + ((lambda16 - 36864 ) / 128);
+          }
+      ` */
+        float lambdaF = float(lambda16);
   
-      i = 1;
-      for (i = 1; thermocouple2 > thermocouple_Table[i]; i = i + 2) { }
-      oil_temperature = map(thermocouple2, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+        // tHIS MAGE NUMBER CAME FROM xxxxx
+        const float EIGHT_KB = 1024 * 8 ;
+  
+        //((float) lamda16 / EIGHT_KB ) //steven
+        AFR = (( lambdaF / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
+    
+        //boost_pressure = user1 * 0.0024438; //0-30psi sensor
+        boost_pressure = map(user1, 818, 7366, 0, 3000);  // 0 - 5 volts maps shows inthe dac as 0 - 8184, maps to 0 - "30" psi
+        boost_pressure = boost_pressure / 100;  //get a float
+  
+        oil_pressure = map(user2, 8184, 6465, 0, 110);  //oil pressure sensor
+  
+        /*
+        int i = 1;  //VW coolant temp sensor, not linear so lookup table needed
+        for (i = 1; user2 > coolantSenseTable[i]; i = i + 2) { }
+        coolant_temperature = map(user2, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
+        */
+        int i = 1;  //VW intake temp sensor, not linear so lookup table needed
+        for (i = 1; user3 > coolantSenseTable[i]; i = i + 2) { }
+        intake_temperature = map(user3, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
+    
+        //before dealing with the thermocouples, we must first calc the CJC temperature
+        i = 1;  //DAQ RTD temperature sensor, not linear so lookup table needed
+        for (i = 1; thermistor < DAQ_Temp_Table[i]; i = i + 2) { }
+        DAQ_temperature = map(thermistor, DAQ_Temp_Table[i - 2], DAQ_Temp_Table[i], DAQ_Temp_Table[i - 3], DAQ_Temp_Table[i - 1]);
       
-      i = 1;
-      for (i = 1; thermocouple3 > thermocouple_Table[i]; i = i + 2) { }
-      turbo_temperature = map(thermocouple3, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+        i = 1;
+        for (i = 1; thermocouple1 > thermocouple_Table[i]; i = i + 2) { }
+        exhuast_temperature = map(thermocouple1, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+    
+        i = 1;
+        for (i = 1; thermocouple2 > thermocouple_Table[i]; i = i + 2) { }
+        oil_temperature = map(thermocouple2, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+        
+        i = 1;
+        for (i = 1; thermocouple3 > thermocouple_Table[i]; i = i + 2) { }
+        turbo_temperature = map(thermocouple3, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
   
-      serialStreamCount = 0;
+        rpm_engine = 12000000 / RPM_count;  //1.2 million is appropriate for one pulse per crankshaft revolution
+        return true;
+      }
     }
   }
+  return false;
+}
+
+void update_averages()
+{
+  delay(1);
 }
 
 void update_display() //called once per ~100ms to refresh the display
@@ -282,7 +303,7 @@ void update_display() //called once per ~100ms to refresh the display
   lcd.write("AFR:");
   if (AFR < 50)
   {
-    dtostrf(AFR, 3, 1, printable_data);
+    dtostrf(AFR, 4, 1, printable_data);
   }
   else
   {
@@ -292,7 +313,7 @@ void update_display() //called once per ~100ms to refresh the display
   //lcd.setCursor(10, 0);
   //lcd.write("RAW:");
   //lcd.setCursor(14, 0);
-  //dtostrf(RPM_count, 4, 0, printable_data);
+  
   //dtostrf(lambda16, 5, 0, printable_data);
   //lcd.print(printable_data);
   //sprintf(printable_data, "RAW: %d", lambda16);
@@ -317,20 +338,21 @@ void update_display() //called once per ~100ms to refresh the display
   
   ///SECOND LINE///
   lcd.setCursor(0, 1);
-  lcd.write("Coolant:");
-  //boost_pressure = 12.1;
-  //dtostrf(boost_pressure, 3, 0, printable_data);
-  //lcd.print(printable_data);
-  //lcd.write(" PSI");
+  lcd.write("MAP:");
+  dtostrf(boost_pressure, 4, 1, printable_data);
+  lcd.write(printable_data);
+  lcd.write(" PSI  ");
   //lcd.setCursor(12, 1);
   //intake_temperature = 55;
-  dtostrf(intake_temperature, 3, 0, printable_data);
-  lcd.print(printable_data);
-  lcd.write(0xDF); //0xDF is the degree sign
-  lcd.write("C  ");
+  //dtostrf(intake_temperature, 3, 0, printable_data);
+  //lcd.print(printable_data);
+  //lcd.write(0xDF); //0xDF is the degree sign
+  //lcd.write("C  ");
 
-
-
+  //brightness troubleshooting
+  //lcd.setCursor(13, 1);
+  //lcd.print(LDRreading, DEC);
+  
   ///THIRD LINE///
   lcd.setCursor(0, 2);
   lcd.write("OIL:");
@@ -344,7 +366,13 @@ void update_display() //called once per ~100ms to refresh the display
   lcd.print(printable_data);
   lcd.write(0xDF); //0xDF is the degree sign
   lcd.write("C  ");
-
+  
+  lcd.setCursor(13, 2);
+  //RPM_count = 1500;
+  dtostrf(rpm_engine, 4, 0, printable_data);
+  lcd.print(printable_data); //0xDF is the degree sign
+  lcd.write("RPM");
+  
   ///FOURTH LINE///
   //turbo_temperature = 999;
   lcd.setCursor(0, 3);
@@ -353,6 +381,15 @@ void update_display() //called once per ~100ms to refresh the display
   lcd.print(printable_data);
   lcd.write(0xDF); //0xDF is the degree sign
   lcd.write("C  ");
+
+  //CRC troubleshooting
+  lcd.setCursor(13, 3);
+  if (crc_good == 1){
+      lcd.write("DiG");
+  }
+  if (crc_good == 0){
+      lcd.write("CRC");
+  }
 
   lcd.setCursor(17, 3);
   //dtostrf(sensor_state, 2, 0, printable_data); //print pump cell pid state
