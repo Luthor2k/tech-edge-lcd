@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <LiquidCrystal.h>
+#include <tables.h>
  
 static const uint8_t SETTING_LDRPIN = A0; // light dependent resistor input pin, set to wherever connected
 int LDRreading;     //raw LDR value; 700 when dark, under 20 when bright
@@ -29,7 +30,9 @@ byte serialStreamCount = 0;
 byte header_1 = 0x5A;
 byte header_2 = 0xA5;
 
-byte sequence_counter;
+uint16_t sequence_counter;
+
+uint16_t parsingLoopCounter;
 
 byte tick_high;
 byte tick_low;
@@ -53,64 +56,6 @@ byte status_low;
 
 byte sensor_state;
 byte heater_state;
-
-//lookup tables for non linear sensors:
-int coolantSenseTable[22] = {
-  3,  5622,
-  10,  5493,
-  20,  5139,
-  30,  4429,
-  40,  3294,
-  50,  2765,
-  60,  2208,
-  70,  1700,
-  80,  1323,
-  90,  1010,
-  100, 730,
-
-};
-
-int DAQ_Temp_Table[34] = {
-  -63, 1024,
-  -27, 960,
-  -14, 896,
-  -5, 882,
-  2, 768,
-  8, 704,
-  14, 640,
-  19, 576,
-  25, 512,
-  31, 448,
-  37, 384,
-  44, 320,
-  51, 256,
-  61, 192,
-  75, 128,
-  98, 64,
-  161, 0
-};
-
-int thermocouple_Table[34] = {
-  //Integer  ADC
-  //Approx,  Count,
-  0, 0,
-  76,  64,
-  151, 128,
-  229, 192,
-  304, 256,
-  378, 320,
-  452, 384,
-  524, 448,
-  597, 512,
-  670, 576,
-  744, 640,
-  819, 704,
-  896, 768,
-  974, 832,
-  1054, 896,
-  1136, 960,
-  1220,  1024
-};
 
 //status messages
 /*
@@ -271,30 +216,28 @@ void remap_raw_values()
   oil_pressure = map(user2, 8184, 6465, 0, 110);  //oil pressure sensor
 
   /*
-  int i = 1;  //VW coolant temp sensor, not linear so lookup table needed
-  for (i = 1; user2 > coolantSenseTable[i]; i = i + 2) { }
-  coolant_temperature = map(user2, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
+  //VW coolant temp sensor, not linear so lookup table needed
+  for (parsingLoopCounter = 1; user2 > coolantSenseTable[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
+  coolant_temperature = map(user2, coolantSenseTable[parsingLoopCounter - 2], coolantSenseTable[parsingLoopCounter], coolantSenseTable[parsingLoopCounter - 3], coolantSenseTable[parsingLoopCounter - 1]);
   */
-  int i = 1;  //VW intake temp sensor, not linear so lookup table needed
-  for (i = 1; user3 > coolantSenseTable[i]; i = i + 2) { }
-  intake_temperature = map(user3, coolantSenseTable[i - 2], coolantSenseTable[i], coolantSenseTable[i - 3], coolantSenseTable[i - 1]);
+
+  //VW intake temp sensor, not linear so lookup table needed
+  for (parsingLoopCounter = 1; user3 > coolantSenseTable[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
+  intake_temperature = map(user3, coolantSenseTable[parsingLoopCounter - 2], coolantSenseTable[parsingLoopCounter], coolantSenseTable[parsingLoopCounter - 3], coolantSenseTable[parsingLoopCounter - 1]);
 
   //before dealing with the thermocouples, we must first calc the CJC temperature
-  i = 1;  //DAQ RTD temperature sensor, not linear so lookup table needed
-  for (i = 1; thermistor < DAQ_Temp_Table[i]; i = i + 2) { }
-  DAQ_temperature = map(thermistor, DAQ_Temp_Table[i - 2], DAQ_Temp_Table[i], DAQ_Temp_Table[i - 3], DAQ_Temp_Table[i - 1]);
+  //DAQ RTD temperature sensor, not linear so lookup table needed
+  for (parsingLoopCounter = 1; thermistor < DAQ_Temp_Table[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
+  DAQ_temperature = map(thermistor, DAQ_Temp_Table[parsingLoopCounter - 2], DAQ_Temp_Table[parsingLoopCounter], DAQ_Temp_Table[parsingLoopCounter - 3], DAQ_Temp_Table[parsingLoopCounter - 1]);
 
-  i = 1;
-  for (i = 1; thermocouple1 > thermocouple_Table[i]; i = i + 2) { }
-  exhuast_temperature = map(thermocouple1, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+  for (parsingLoopCounter = 1; thermocouple1 > thermocouple_Table[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
+  exhuast_temperature = map(thermocouple1, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQ_temperature;
 
-  i = 1;
-  for (i = 1; thermocouple2 > thermocouple_Table[i]; i = i + 2) { }
-  oil_temperature = map(thermocouple2, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+  for (parsingLoopCounter = 1; thermocouple2 > thermocouple_Table[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
+  oil_temperature = map(thermocouple2, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQ_temperature;
   
-  i = 1;
-  for (i = 1; thermocouple3 > thermocouple_Table[i]; i = i + 2) { }
-  turbo_temperature = map(thermocouple3, thermocouple_Table[i - 2], thermocouple_Table[i], thermocouple_Table[i - 3], thermocouple_Table[i - 1]) + DAQ_temperature;
+  for (parsingLoopCounter = 1; thermocouple3 > thermocouple_Table[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
+  turbo_temperature = map(thermocouple3, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQ_temperature;
 
   rpm_engine = 12000000 / RPM_count;  //1.2 million is appropriate for one pulse per crankshaft revolution
 }
