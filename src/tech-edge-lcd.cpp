@@ -5,7 +5,7 @@
 
 #include <Arduino.h>
 #include <LiquidCrystal.h>
-#include <sensor_tables.h>
+#include <sensor-tables.h>
 
 //settings for engine config:
 const uint8_t SETTING_ENGINE_PULSES_PER_REV = 1;
