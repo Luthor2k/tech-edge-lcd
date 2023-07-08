@@ -18,9 +18,11 @@ unsigned long prevBrightnessUpdateTime = 0;
 const uint64_t SETTING_BRIGHTNESS_UPDATE_INTERVAL_MS = 5000; //set this to how often to update the brightness in milliseconds
 
 //Serial stream from controller
-const uint8_t MAX_SERIAL_STRING_LENGTH = 56;
+const uint8_t DATA_FRAME_HEADER_1 = 0x5a;
+const uint8_t DATA_FRAME_HEADER_2 = 0xa5;
+const uint8_t DATA_FRAME_RX_LENGTH_BYTES = 28;
 const uint8_t SETTING_SERIAL_FRAME_RX_DELAY_MS = 15; //approx time for the serial frame to definetly complete
-uint8_t incomingSerial[MAX_SERIAL_STRING_LENGTH];
+uint8_t incomingSerial[DATA_FRAME_RX_LENGTH_BYTES];
 byte serialStreamCount = 0;
 
 // Raw data coming in from controller:
@@ -200,9 +202,9 @@ bool check_serial()
 
     delay(SETTING_SERIAL_FRAME_RX_DELAY_MS);  //pause for the time of 1 frame to complete
 
-    Serial.readBytesUntil(0x5A, incomingSerial, 30);
+    Serial.readBytesUntil(DATA_FRAME_HEADER_1, incomingSerial, DATA_FRAME_RX_LENGTH_BYTES);
 
-    if (incomingSerial[0] == byte(0xA5))    //should be the second of the 0x5A 0xA5 frame header
+    if (incomingSerial[0] == byte(DATA_FRAME_HEADER_2))    //should be the second of the 0x5A 0xA5 frame header
     {
       // CRC calculation
       crc_sum = 0;
@@ -212,7 +214,7 @@ bool check_serial()
       }
 
       crc_good = false;
-      if (crc_comp == 0xA5){
+      if (crc_comp == DATA_FRAME_HEADER_2){
         crc_good = true;
   
         /// Break apart the frame: ///
