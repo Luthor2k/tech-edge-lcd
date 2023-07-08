@@ -1,22 +1,26 @@
 //  Vacuum Fluorescent Display for use with Tech Edge wideband 2Y1 controller
 //  Dec 2017 Arthur Hazleden
 
+//  https://github.com/Luthor2k/tech-edge-lcd
+
 #include <Arduino.h>
 #include <LiquidCrystal.h>
-
-int LDRPin = A0;    // light dependent resistor input ping
+ 
+static const uint8_t SETTING_LDRPIN = A0; // light dependent resistor input pin, set to wherever connected
 int LDRreading;     //raw LDR value; 700 when dark, under 20 when bright
-int LDRState = 1;  // will be set to one of four brightness levels
+int LDRState = 1;  // will be set to one of four brightness levels, start out at 1
 
 //program funtion timing
 unsigned long prevDisplayUpdateTime = 0;
-const long DisplayUpdateInterval = 100; //ms
+const uint64_t SETTING_DISPLAY_UPDATE_INTERVAL_MS = 100;
 
 unsigned long prevBrightnessUpdateTime = 0;
-const long BrightnessUpdateInterval = 5000; //ms
+const uint64_t SETTING_BRIGHTNESS_UPDATE_INTERVAL_MS = 5000; //set this to how often to update the brightness in milliseconds
 
 //Serial stream from controller
-byte incomingSerial[56];
+const uint8_t MAX_SERIAL_STRING_LENGTH = 56;
+const uint8_t SETTING_SERIAL_FRAME_RX_DELAY_MS = 15; //approx time for the serial frame to definetly complete
+uint8_t incomingSerial[MAX_SERIAL_STRING_LENGTH];
 byte serialStreamCount = 0;
 
 // Raw data coming in from controller:
@@ -47,9 +51,6 @@ byte status_low;
 
 byte sensor_state;
 byte heater_state;
-
-//lookup look loop counter
-int i = 0;
 
 //lookup tables for non linear sensors:
 int coolantSenseTable[22] = {
@@ -167,7 +168,7 @@ void setup() {
   lcd.clear();
 
   //some test data:
-  lambda16 = 10000;  //should be diesel stoic
+  //lambda16 = 10000;  //should be diesel stoic
   //float lambdaF = float(lambda16);
   //AFR = (( lambdaF / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
 
@@ -181,12 +182,12 @@ void loop() {
     remap_raw_values();
   }
 
-  if (currentMillis - prevDisplayUpdateTime >= DisplayUpdateInterval) {
+  if (currentMillis - prevDisplayUpdateTime >= SETTING_DISPLAY_UPDATE_INTERVAL_MS) {
     prevDisplayUpdateTime = currentMillis;
     update_display();
   }
 
-  if (currentMillis - prevBrightnessUpdateTime >= BrightnessUpdateInterval) {
+  if (currentMillis - prevBrightnessUpdateTime >= SETTING_BRIGHTNESS_UPDATE_INTERVAL_MS) {
     prevBrightnessUpdateTime = currentMillis;
     update_brightness();
   }
@@ -197,7 +198,7 @@ bool check_serial()
 {
   if (Serial.available() > 0) {
 
-    delay(15);  //pause for the time of 1 frame to complete, 15ms?
+    delay(SETTING_SERIAL_FRAME_RX_DELAY_MS);  //pause for the time of 1 frame to complete
 
     Serial.readBytesUntil(0x5A, incomingSerial, 30);
 
@@ -207,7 +208,7 @@ bool check_serial()
       crc_sum = 0;
       for (byte frame_byte_number = 0; frame_byte_number < 27; frame_byte_number++){
         crc_sum += incomingSerial[frame_byte_number];
-        crc_comp = lowByte(crc_sum);  //should ALWAYS be 0xFF
+        crc_comp = lowByte(crc_sum);  //should ALWAYS be 0xFF. well, should always be 0xA5 because of how the frame sync is being done..
       }
 
       crc_good = false;
@@ -414,7 +415,7 @@ void update_display() //called once per ~100ms to refresh the display
 
 void update_brightness()
 {
-  LDRreading = analogRead(LDRPin);
+  LDRreading = analogRead(SETTING_LDRPIN);
 
   if (LDRreading > 700)
   {
