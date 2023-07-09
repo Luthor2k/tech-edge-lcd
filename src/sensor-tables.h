@@ -3,7 +3,7 @@
 //  https://github.com/Luthor2k/tech-edge-lcd
 
 //vw coolant temp sensor
-int coolantSenseTable[22] = {
+uint16_t coolantSenseTable[22] = {
   3,  5622,
   10,  5493,
   20,  5139,
@@ -41,7 +41,7 @@ int DAQ_Temp_Table[34] = {
 };
 
 //type K thermocoupe
-int thermocouple_Table[34] = {
+uint16_t thermocouple_Table[34] = {
   //Integer  ADC
   //Approx,  Count,
   0, 0,

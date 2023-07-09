@@ -9,8 +9,7 @@
 
 //settings for engine config:
 const uint8_t SETTING_ENGINE_PULSES_PER_REV = 1;
-
-const int16_t SETTING_STOIC_AFR = 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
+const float SETTING_STOIC_AFR = 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
 
 //light dependent resistor for display brightness
 static const uint8_t SETTING_LDRPIN = A0; //LDR input pin, set to wherever connected
@@ -18,6 +17,7 @@ int LDRreading;     //raw LDR value; 700 when dark, under 20 when bright
 int LDRState = 1;  // will be set to one of four brightness levels, start out at 1
 
 LiquidCrystal lcd(13, 11, 5, 4, 3, 2);
+static const uint8_t SETTING_LCD_WR_PIN =12;    // LCD read / write pin, pulled low to write only
 
 //program function timing
 unsigned long prevDisplayUpdateTime = 0;
@@ -76,19 +76,18 @@ String status_lean = "LEAN";
 
 // Corrected data values:
 float lambda;
-int32_t AFR;
+float AFR;
 
-int32_t boostPressure;
-int32_t oilPressure;
-int32_t intakeTemperature;
-int32_t coolant_temperature;
-int32_t throttle_position;
+float intakePressurePSI;
+//float oilPressurePSI;
+float intakeTemperatureC;
+float throttlePositionPercent;
 
-uint16_t exhuastTemperature;
-uint16_t oilTemperature;
-uint16_t turboTemperature;
+uint16_t exhuastTemperatureC;
+uint16_t oilTemperatureC;
+uint16_t turboTemperatureC;
 
-uint16_t DAQTemperature;
+float DAQTemperatureC;
 
 uint16_t engineRPM;
 
@@ -109,8 +108,8 @@ void remap_raw_values();
 void setup() {
   Serial.begin(19200);
 
-  pinMode(12, OUTPUT);
-  digitalWrite(12, LOW);
+  pinMode(SETTING_LCD_WR_PIN, OUTPUT);
+  digitalWrite(SETTING_LCD_WR_PIN, LOW);
 
   lcd.begin(20, 4);
   lcd.clear();
@@ -163,7 +162,7 @@ bool check_serial()
         DAQRawLambda16 = (int(incomingSerial[4]) * 256) + int(incomingSerial[5]);
     
         DAQRawUser1 = (int(incomingSerial[8]) * 256) + int(incomingSerial[9]);      //boost pressure
-        DAQRawUser2 = (int(incomingSerial[10]) * 256) + int(incomingSerial[11]);    //oil pressure
+        DAQRawUser2 = (int(incomingSerial[10]) * 256) + int(incomingSerial[11]);    //throttle position
         DAQRawUser3 = (int(incomingSerial[12]) * 256) + int(incomingSerial[13]);    //intake temperature
     
         DAQRawThermocouple1 = (int(incomingSerial[14]) * 256) + int(incomingSerial[15]);  //egt, needs correcting curve to be applied
@@ -190,15 +189,11 @@ void update_averages()
 void remap_raw_values()
 {
   /// remap all raw values to their real-world values: ///
-  lambda = float(DAQRawLambda16);
-  //AFR = (( lambda / 8192 ) + 0.5 ) * SETTING_STOIC_AFR;
-  AFR = (( lambda / 8192 ) + 0.5 ) * 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
+  AFR = ((float(DAQRawLambda16) / 8192 ) + 0.5 ) * SETTING_STOIC_AFR;
 
-  //boostPressure = DAQRawUser1 * 0.0024438; //0-30psi sensor
-  boostPressure = map(DAQRawUser1, 818, 7366, 0, 3000);  // 0 - 5 volts maps shows inthe dac as 0 - 8184, maps to 0 - "30" psi
-  boostPressure = boostPressure / 100;  //move the decimal place
+  intakePressurePSI = float(map(DAQRawUser1, 818, 7366, 0, 3000)) / 100;  // 0 - 5 volts maps shows inthe dac as 0 - 8184, maps to 0 - "30" psi
 
-  oilPressure = map(DAQRawUser2, 8184, 6465, 0, 110);  //oil pressure sensor
+  //oilPressurePSI = map(DAQRawUser2, 8184, 6465, 0, 110);  //oil pressure sensor
 
   /*
   //VW coolant temp sensor, not linear so lookup table needed
@@ -208,21 +203,21 @@ void remap_raw_values()
 
   //VW intake temp sensor, not linear so lookup table needed
   for (parsingLoopCounter = 1; DAQRawUser3 > coolantSenseTable[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
-  intakeTemperature = map(DAQRawUser3, coolantSenseTable[parsingLoopCounter - 2], coolantSenseTable[parsingLoopCounter], coolantSenseTable[parsingLoopCounter - 3], coolantSenseTable[parsingLoopCounter - 1]);
+  intakeTemperatureC = map(DAQRawUser3, coolantSenseTable[parsingLoopCounter - 2], coolantSenseTable[parsingLoopCounter], coolantSenseTable[parsingLoopCounter - 3], coolantSenseTable[parsingLoopCounter - 1]);
 
   //before dealing with the thermocouples, we must first calc the CJC temperature
   //DAQ RTD temperature sensor, not linear so lookup table needed
   for (parsingLoopCounter = 1; DAQRawOnboardThermistor < DAQ_Temp_Table[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
-  DAQTemperature = map(DAQRawOnboardThermistor, DAQ_Temp_Table[parsingLoopCounter - 2], DAQ_Temp_Table[parsingLoopCounter], DAQ_Temp_Table[parsingLoopCounter - 3], DAQ_Temp_Table[parsingLoopCounter - 1]);
+  DAQTemperatureC = map(DAQRawOnboardThermistor, DAQ_Temp_Table[parsingLoopCounter - 2], DAQ_Temp_Table[parsingLoopCounter], DAQ_Temp_Table[parsingLoopCounter - 3], DAQ_Temp_Table[parsingLoopCounter - 1]);
 
   for (parsingLoopCounter = 1; DAQRawThermocouple1 > thermocouple_Table[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
-  exhuastTemperature = map(DAQRawThermocouple1, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQTemperature;
+  exhuastTemperatureC = map(DAQRawThermocouple1, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQTemperatureC;
 
   for (parsingLoopCounter = 1; DAQRawThermocouple2 > thermocouple_Table[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
-  oilTemperature = map(DAQRawThermocouple2, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQTemperature;
+  oilTemperatureC = map(DAQRawThermocouple2, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQTemperatureC;
   
   for (parsingLoopCounter = 1; DAQRawThermocouple3 > thermocouple_Table[parsingLoopCounter]; parsingLoopCounter = parsingLoopCounter + 2) { }
-  turboTemperature = map(DAQRawThermocouple3, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQTemperature;
+  turboTemperatureC = map(DAQRawThermocouple3, thermocouple_Table[parsingLoopCounter - 2], thermocouple_Table[parsingLoopCounter], thermocouple_Table[parsingLoopCounter - 3], thermocouple_Table[parsingLoopCounter - 1]) + DAQTemperatureC;
 
   engineRPM = 12000000 / (DAQRawRPMCount * SETTING_ENGINE_PULSES_PER_REV);  //1.2 million is appropriate for one pulse per crankshaft revolution
 }
@@ -244,80 +239,55 @@ void update_display() //called once per ~100ms to refresh the display
   }
   else
   {
-    //status_lean.toCharArray(printable_data, 5); //if running in a lean condition, paste lean test into lcd buffer
     lcd.write("LEAN");
   }
-   
-  //lcd.setCursor(10, 0);
-  //lcd.write("RAW:");
-  //lcd.setCursor(14, 0);
-  
-  //dtostrf(DAQRawLambda16, 5, 0, printable_data);
-  //lcd.print(printable_data);
-  //sprintf(printable_data, "RAW: %d", DAQRawLambda16);
-  //lcd.print(printable_data);
-  //lcd.print(String(DAQRawLambda16));
-  /*
-  char str_temp[6];
-  // 4 is mininum width, 2 is precision; float value is copied onto str_temp
-  AFR = 14.9;
-  dtostrf(AFR, 4, 1, str_temp);   //arduino doesnt do floats
-  sprintf (printable_data, "AFR: %s RAW: %d", str_temp, DAQRawLambda16);
-  lcd.print(printable_data);
-  */
 
-  lcd.setCursor(10, 0);
+  lcd.setCursor(11, 0);
   lcd.write("EGT:");
-  dtostrf(exhuastTemperature, 3, 0, printable_data);
+  dtostrf(exhuastTemperatureC, 3, 0, printable_data);
   lcd.print(printable_data);
   lcd.write(0xDF);
-  lcd.write("C ");  
+  lcd.write("C");  
   
   ///SECOND LINE///
   lcd.setCursor(0, 1);
-  lcd.write("MAP:");
-  dtostrf(boostPressure, 4, 1, printable_data);
+  lcd.write("INTAKE:");
+  dtostrf(intakePressurePSI, 4, 1, printable_data);
   lcd.write(printable_data);
-  lcd.write(" PSI  ");
-  //lcd.setCursor(12, 1);
-  //intakeTemperature = 55;
-  //dtostrf(intakeTemperature, 3, 0, printable_data);
-  //lcd.print(printable_data);
-  //lcd.write(0xDF); //0xDF is the degree sign
-  //lcd.write("C  ");
+  lcd.write(" PSI");
+  dtostrf(intakeTemperatureC, 3, 0, printable_data);
+  lcd.print(printable_data);
+  lcd.write(0xDF); //0xDF is the degree sign
+  lcd.write("C");
 
   //brightness troubleshooting
   //lcd.setCursor(13, 1);
   //lcd.print(LDRreading, DEC);
   
   ///THIRD LINE///
+  
   lcd.setCursor(0, 2);
   lcd.write("OIL:");
-  //oilPressure = 34.8;
-  //dtostrf(oilPressure, 3, 0, printable_data);    //OIL PSI
+  //dtostrf(oilPressurePSI, 3, 0, printable_data);    //OIL PSI
   //lcd.print(printable_data);
-  //lcd.write(" PSI");
-  //lcd.setCursor(12, 2);
-  //oilTemperature = 0;
-  dtostrf(oilTemperature, 3, 0, printable_data); //oil temperature
+  //lcd.write("PSI ");
+  dtostrf(oilTemperatureC, 3, 0, printable_data); //oil temperature
   lcd.print(printable_data);
   lcd.write(0xDF); //0xDF is the degree sign
-  lcd.write("C  ");
+  lcd.write("C");
   
   lcd.setCursor(13, 2);
-  //DAQRawRPMCount = 1500;
   dtostrf(engineRPM, 4, 0, printable_data);
   lcd.print(printable_data); //0xDF is the degree sign
   lcd.write("RPM");
-  
+
   ///FOURTH LINE///
-  //turboTemperature = 999;
   lcd.setCursor(0, 3);
   lcd.write("METER:");
-  dtostrf(turboTemperature, 3, 0, printable_data);
+  dtostrf(turboTemperatureC, 3, 0, printable_data);
   lcd.print(printable_data);
   lcd.write(0xDF); //0xDF is the degree sign
-  lcd.write("C  ");
+  lcd.write("C");
 
   //CRC troubleshooting
   lcd.setCursor(13, 3);
@@ -337,6 +307,7 @@ void update_display() //called once per ~100ms to refresh the display
   //dtostrf(DAQRawHeaterState, 2, 0, printable_data); //print heater pid state
   //lcd.print(printable_data);
   lcd.print(String(DAQRawHeaterState));  
+  
 }
 
 void update_brightness()
