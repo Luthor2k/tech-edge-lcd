@@ -11,16 +11,24 @@
 #include <SD.h>
 #include <SPI.h>
 
+//Pins:
+static const uint8_t SETTING_LDRPIN = A0; //LDR input pin, set to wherever connected
+static const uint8_t SETTING_SD_CARD_CS = 15; //chip select pin 
+static const uint8_t SETTING_STATUS_LED = 13; //chip select pin 
+
 //settings for engine config:
 const uint8_t SETTING_ENGINE_PULSES_PER_REV = 1;
 const float SETTING_STOIC_AFR = 14.5; //AFR of 14.5 is correct for a diesel, 14.7 for gas
 
 //light dependent resistor for display brightness
-static const uint8_t SETTING_LDRPIN = A0; //LDR input pin, set to wherever connected
 int LDRreading;     //raw LDR value; 700 when dark, under 20 when bright
 int LDRState = 1;  // will be set to one of four brightness levels, start out at 1
 
 SerLCD lcd; // Initialize the library with default I2C address 0x72
+
+RTC_DS3231 rtc;
+
+HardwareSerial DAQSerialPort(1);  //if using UART1
 
 //program function timing
 unsigned long prevDisplayUpdateTime = 0;
@@ -109,15 +117,95 @@ void update_brightness();
 void remap_raw_values();
 
 void setup() {
-  Serial.begin(19200);
+  //initialize ports
+  Serial.begin(115200);
+  Wire.begin();
+  DAQSerialPort.begin(19200, SERIAL_8N1, 16, 17);
+  delay(20);
+  pinMode(SETTING_STATUS_LED, OUTPUT);
 
+  //lcd setup
   lcd.begin(Wire);
-  delay(100);
+  delay(20);
   Wire.setClock(400000); //Optional - set I2C SCL to High Speed Mode of 400kHz
-  lcd.setBacklight(255, 255, 255); //bright white
+  //lcd.setBacklight(255, 255, 255); //bright white
+  lcd.setContrast(60); //Set contrast. Lower to 0 for higher contrast.
   lcd.clear();
+  delay(20);
+  lcd.setCursor(0, 0);
+  lcd.print("tech-edge-esp32-test");
+  lcd.setCursor(0, 2);
+  lcd.print("compiled ");
+  lcd.print(String(__DATE__));
+  /*
+  //SD card setup
+  if(!SD.begin(SETTING_SD_CARD_CS)){
+      Serial.println("Card Mount Failed");
+      return;
+  }
+  uint8_t cardType = SD.cardType();
+
+  if(cardType == CARD_NONE){
+      Serial.println("No SD card attached");
+      return;
+  }
+
+  Serial.print("SD Card Type: ");
+  if(cardType == CARD_MMC){
+      Serial.println("MMC");
+  } else if(cardType == CARD_SD){
+      Serial.println("SDSC");
+  } else if(cardType == CARD_SDHC){
+      Serial.println("SDHC");
+  } else {
+      Serial.println("UNKNOWN");
+  }
+
+  uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+  Serial.printf("SD Card Size: %lluMB\n", cardSize);
+
+  //rtc setup
+  if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    Serial.flush();
+    while (1) delay(10);
+  }
+
+  if (rtc.lostPower()) {
+    Serial.println("RTC lost power, let's set the time!");
+    // When time needs to be set on a new device, or after a power loss, the
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // This line sets the RTC with an explicit date & time, for example to set
+    // January 21, 2014 at 3am you would call:
+    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+  }
+
+  // When time needs to be re-set on a previously configured device, the
+  // following line sets the RTC to the date & time this sketch was compiled
+  // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  // This line sets the RTC with an explicit date & time, for example to set
+  // January 21, 2014 at 3am you would call:
+  // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+
+  */
 
 
+  /*
+  DateTime now = rtc.now();
+  Serial.print(now.year(), DEC);
+  Serial.print('/');
+  Serial.print(now.month(), DEC);
+  Serial.print('/');
+  Serial.print(now.day(), DEC);
+  Serial.print(" ");
+  Serial.print(now.hour(), DEC);
+  Serial.print(':');
+  Serial.print(now.minute(), DEC);
+  Serial.print(':');
+  Serial.print(now.second(), DEC);
+  Serial.println();
+  */
 }
 
 void loop() {
@@ -132,21 +220,24 @@ void loop() {
     prevDisplayUpdateTime = currentMillis;
     update_display();
   }
-
+  
   if (currentMillis - prevBrightnessUpdateTime >= SETTING_BRIGHTNESS_UPDATE_INTERVAL_MS) {
     prevBrightnessUpdateTime = currentMillis;
     update_brightness();
   }
-
+  
 }
 
 bool check_serial()
 {
-  if (Serial.available() > 0) {
+  if (DAQSerialPort.available() > 0) {
+    
+    digitalWrite(SETTING_STATUS_LED, HIGH);
 
     delay(SETTING_SERIAL_FRAME_RX_DELAY_MS);  //pause for the time of 1 frame to complete
 
-    Serial.readBytesUntil(DATA_FRAME_frameheader1, incomingSerial, DATA_FRAME_RX_LENGTH_BYTES);
+    DAQSerialPort.readBytesUntil(DATA_FRAME_frameheader1, incomingSerial, DATA_FRAME_RX_LENGTH_BYTES);
+    digitalWrite(SETTING_STATUS_LED, LOW);
 
     if (incomingSerial[0] == byte(DATA_FRAME_frameheader2))    //should be the second of the 0x5A 0xA5 frame header
     {
@@ -318,33 +409,12 @@ void update_display() //called once per ~100ms to refresh the display
 void update_brightness()
 {
   LDRreading = analogRead(SETTING_LDRPIN);
+  LDRreading = 700;
 
-  if (LDRreading > 700)
-  {
-    LDRState = 1;
-    lcd.command((byte)0x20);  //tell VFD to go into 'funtion set' mode
-    lcd.write((byte)0x03);    //set to lowest brightness when dark
-  }
+  //assuming LDR at brightest is 700, darkest is 0
+  float ambientLightLevel = map(LDRreading, 0, 700, 0, 1);
 
-  if ((LDRreading < 650) && (LDRreading > 300))
-  {
-    LDRState = 2;
-    lcd.command((byte)0x20);
-    lcd.write((byte)0x02);
-  }
-
-  if ((LDRreading < 250) && (LDRreading > 30))
-  {
-    LDRState = 3;
-    lcd.command((byte)0x20);
-    lcd.write((byte)0x01);
-  }
-
-  if (LDRreading < 20)
-  {
-    LDRState = 4;
-    lcd.command((byte)0x20);
-    lcd.write((byte)0x00);    //set to highest brightness in daylight
-  }
+  //lcd.setBacklight(255, 255, 255); //bright white
+  lcd.setBacklight(int(255*ambientLightLevel), int(120*ambientLightLevel), int(90*ambientLightLevel));
 
 }
