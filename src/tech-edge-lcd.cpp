@@ -4,8 +4,12 @@
 //  https://github.com/Luthor2k/tech-edge-lcd
 
 #include <Arduino.h>
-#include <LiquidCrystal.h>
 #include <sensor-tables.h>
+#include <RTClib.h>
+#include <SerLCD.h> //Click here to get the library: http://librarymanager/All#SparkFun_SerLCD
+#include <HardwareSerial.h>
+#include <SD.h>
+#include <SPI.h>
 
 //settings for engine config:
 const uint8_t SETTING_ENGINE_PULSES_PER_REV = 1;
@@ -16,8 +20,7 @@ static const uint8_t SETTING_LDRPIN = A0; //LDR input pin, set to wherever conne
 int LDRreading;     //raw LDR value; 700 when dark, under 20 when bright
 int LDRState = 1;  // will be set to one of four brightness levels, start out at 1
 
-LiquidCrystal lcd(13, 11, 5, 4, 3, 2);
-static const uint8_t SETTING_LCD_WR_PIN =12;    // LCD read / write pin, pulled low to write only
+SerLCD lcd; // Initialize the library with default I2C address 0x72
 
 //program function timing
 unsigned long prevDisplayUpdateTime = 0;
@@ -108,11 +111,13 @@ void remap_raw_values();
 void setup() {
   Serial.begin(19200);
 
-  pinMode(SETTING_LCD_WR_PIN, OUTPUT);
-  digitalWrite(SETTING_LCD_WR_PIN, LOW);
-
-  lcd.begin(20, 4);
+  lcd.begin(Wire);
+  delay(100);
+  Wire.setClock(400000); //Optional - set I2C SCL to High Speed Mode of 400kHz
+  lcd.setBacklight(255, 255, 255); //bright white
   lcd.clear();
+
+
 }
 
 void loop() {
